@@ -1,0 +1,13 @@
+# whitelist: only the app is published
+*
+!.gitignore
+!README.md
+!index.html
+!backtester.html
+!backtester_data.js
+!manifest.json
+!sw.js
+!lib/
+!lib/**
+!icons/
+!icons/**
