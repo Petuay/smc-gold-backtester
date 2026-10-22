@@ -495,7 +495,6 @@ function popMsg(){ const b=msg.firstElementChild; if(!b) return; b.classList.rem
 function readTrade(){
   const e=+document.getElementById("entry").value, s=+document.getElementById("sl").value, t=+document.getElementById("tp").value;
   if(liveTrade){msg.textContent="A trade is already open — close it first.";return null;}
-  if(!setup){msg.textContent="Pick setup type (CHoCH or BOS).";return null;}
   if(!dir){msg.textContent="Pick a direction.";return null;}
   if(!(e&&s&&t)){msg.textContent="Set entry, SL and TP.";return null;}
   const risk=Math.abs(e-s); if(risk<=0){msg.textContent="SL must differ from entry.";return null;}
@@ -503,7 +502,7 @@ function readTrade(){
   if(dir==="sell"&& !(s>e && t<e)){msg.textContent="Sell: need TP<entry<SL.";return null;}
   const score=[...document.querySelectorAll(".cf")].filter(c=>c.checked).length;
   const zone=document.getElementById("obzone").checked?"OB":"DZ/SZ";
-  return {dir,setup,zone,e,s,t,risk,rewR:Math.abs(t-e)/risk,score,entryIdx:i,
+  return {dir,setup:setup||"",zone,e,s,t,risk,rewR:Math.abs(t-e)/risk,score,entryIdx:i,
           note:document.getElementById("note").value.replace(/[\n,]/g," ")};
 }
 
@@ -520,7 +519,7 @@ function logTrade(tr, exitIdx, exitType){
     exitTime:fmt(BASE[exitIdx][0]),session,note:tr.note,
     drawings:JSON.parse(JSON.stringify(objects))});   // snapshot this session's structure reads for later review
   save();
-  msg.innerHTML=`<b class="${res==='Win'?'win':'loss'}">${res} ${R>0?'+':''}${R}R</b> · ${tr.setup} · ${tr.zone} · exit:${exitType}`;
+  msg.innerHTML=`<b class="${res==='Win'?'win':'loss'}">${res} ${R>0?'+':''}${R}R</b> · ${tr.setup||"no setup"} · ${tr.zone} · exit:${exitType}`;
   flash(res==='Win'?'win':'loss'); popMsg();
 }
 
@@ -680,14 +679,31 @@ async function fetchDataset(key,onp){
     if(!raw[tf].length) throw new Error("no data for "+tf);
   }
   // weekend + holiday dead-day filter (same rules as the PC script): Fri>=21h, Sat, Sun<22h UTC; dead day = path/bar < 0.30
-  const closed=t=>{ const d=new Date(t*1000), dow=d.getUTCDay(), h=d.getUTCHours(); return (dow===5&&h>=21)||dow===6||(dow===0&&h<22); };
+  // weekend close + the dead daily rollover hour 21:00-21:59 UTC (feed goes stale there)
+  const closed=t=>{ const d=new Date(t*1000), dow=d.getUTCDay(), h=d.getUTCHours(); return (dow===5&&h>=21)||dow===6||(dow===0&&h<22)||h===21; };
   const day=t=>new Date(t*1000).toISOString().slice(0,10);
   const byDay=new Map();
   for(const r of raw.M1){ if(closed(r[0])) continue; const d=day(r[0]); if(!byDay.has(d)) byDay.set(d,[]); byDay.get(d).push(r); }
   const dead=new Set();
   for(const [d,rs] of byDay){ let path=0; for(let i=1;i<rs.length;i++) path+=Math.abs(rs[i][4]-rs[i-1][4]); if(path/rs.length<0.30) dead.add(d); }
-  const out={symbol:"XAU/USD (spot gold, weekends + holidays removed)",tf:{}};
-  for(const [tf] of PLAN) out.tf[tf]=raw[tf].filter(r=>!closed(r[0])&&!dead.has(day(r[0]))).map(r=>[r[0],+r[1].toFixed(2),+r[2].toFixed(2),+r[3].toFixed(2),+r[4].toFixed(2)]);
+  // drop runs of >=5 consecutive bars whose range is <=15% of this TF's median (stale/flat "dead zones")
+  const dropDeadRuns=rows=>{
+    if(rows.length<10) return rows;
+    const rs=rows.map(r=>r[2]-r[3]).slice().sort((a,b)=>a-b), med=rs[rs.length>>1];
+    if(!(med>0)) return rows;
+    const low=rows.map(r=>(r[2]-r[3])<=med*0.15), kill=new Array(rows.length).fill(false);
+    for(let i=0;i<low.length;){
+      if(low[i]){ let j=i; while(j+1<low.length&&low[j+1]) j++; if(j-i+1>=5) for(let k=i;k<=j;k++) kill[k]=true; i=j+1; }
+      else i++;
+    }
+    return rows.filter((_,i)=>!kill[i]);
+  };
+  const out={symbol:"XAU/USD (spot gold · weekends, holidays & dead zones removed)",tf:{}};
+  for(const [tf] of PLAN){
+    let rows=raw[tf].filter(r=>!closed(r[0])&&!dead.has(day(r[0]))).map(r=>[r[0],+r[1].toFixed(2),+r[2].toFixed(2),+r[3].toFixed(2),+r[4].toFixed(2)]);
+    if(["M1","M5","M15","M30","H1"].includes(tf)) rows=dropDeadRuns(rows);
+    out.tf[tf]=rows;
+  }
   onp(`done · M1 ${out.tf.M1.length} bars · holidays removed: ${[...dead].join(", ")||"none"}`);
   return out;
 }
