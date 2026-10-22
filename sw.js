@@ -1,4 +1,4 @@
-const CACHE="smc-bt-v2";
+const CACHE="smc-bt-v3";
 const SHELL=["./","./index.html","./backtester.html","./lib/lightweight-charts.js","./manifest.json",
              "./icons/icon-180.png","./icons/icon-192.png","./icons/icon-512.png"];
 self.addEventListener("install",e=>{
